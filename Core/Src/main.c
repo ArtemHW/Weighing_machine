@@ -34,6 +34,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define SIZE_BUFFER 50
+#define ETALON 197
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -59,6 +60,9 @@ typedef struct
 	uint16_t adc_buf_result;
 	uint16_t adc_calibration[SIZE_BUFFER];
 	uint16_t adc_calibration_result;
+	uint16_t adc_calibration_result1;
+	uint16_t offset;
+	uint16_t k;
 }buffer_uart;
 buffer_uart buffer;
 
@@ -97,6 +101,8 @@ void sendUSART1char(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+	buffer.offset = 0;
+	buffer.k = 1;
 
   /* USER CODE END 1 */
 
@@ -166,7 +172,7 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-  xTaskCreate(calibration, "calibration", 128, NULL, 5, NULL);
+  xTaskCreate(calibration, "calibration", 180, NULL, 5, NULL);
   xTaskCreate(weighing, "weighing", 64, NULL, 2, NULL);
   xTaskCreate(sendUSART1weighing, "send data W", 128, NULL, 3, NULL);
   xTaskCreate(receiveUSART1, "receive data", 64, NULL, 2, NULL);
@@ -366,16 +372,16 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
+  /*Configure GPIO pins : PC13 PC10 PC11 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_10|GPIO_PIN_11;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
   /*Configure GPIO pins : PC2 PC3 */
   GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PC10 PC11 */
-  GPIO_InitStruct.Pin = GPIO_PIN_10|GPIO_PIN_11;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
@@ -384,6 +390,9 @@ static void MX_GPIO_Init(void)
 
   HAL_NVIC_SetPriority(EXTI3_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
 
@@ -396,6 +405,7 @@ void calibration(void)
 		for(int i = 0; i < SIZE_BUFFER; i++)
 		{
 			arm_mean_q15((int16_t*)&buffer.adc_buf, sizeof(buffer.adc_buf)/2, (int16_t*)&buffer.adc_calibration[i]);
+			vTaskDelay(50);
 		}
 		arm_mean_q15((int16_t*)&buffer.adc_calibration, sizeof(buffer.adc_calibration)/2, (int16_t*)&buffer.adc_calibration_result);
 		char string_buff[] = "Calibration 0 value: = ";
@@ -409,9 +419,38 @@ void calibration(void)
 		xQueueSend(buffer.queueh_clbrt, (void*)(((char*) &buffer.adc_calibration_result)+1), 1);
 		xEventGroupSetBits(xCreatedEventGroup1, 0x4);
 		xEventGroupWaitBits(xCreatedEventGroup1, 0x8, pdTRUE, pdTRUE, portMAX_DELAY);
+		char string_buff2[] = "Place 197 grams etalon\r\n";
+		xQueueReset(buffer.queueh_clbrt);
+		for(uint8_t i = 0; i<(sizeof(string_buff2)); i++)
+		{
+			xQueueSend(buffer.queueh_clbrt, (void*)(&string_buff2[i]), 5);
+		}
+		xEventGroupSetBits(xCreatedEventGroup1, 0x1);
+		xEventGroupWaitBits(xCreatedEventGroup1, 0x2, pdTRUE, pdTRUE, portMAX_DELAY);
+		xEventGroupWaitBits(xCreatedEventGroup1, 0x10, pdTRUE, pdTRUE, portMAX_DELAY);
+		for(int i = 0; i < SIZE_BUFFER; i++)
+		{
+			arm_mean_q15((int16_t*)&buffer.adc_buf, sizeof(buffer.adc_buf)/2, (int16_t*)&buffer.adc_calibration[i]);
+			vTaskDelay(50);
+		}
+		arm_mean_q15((int16_t*)&buffer.adc_calibration, sizeof(buffer.adc_calibration)/2, (int16_t*)&buffer.adc_calibration_result1);
+		char string_buff3[] = "Calibration 1 value: = ";
+				for(uint8_t i = 0; i<(sizeof(string_buff3)); i++)
+		{
+			xQueueSend(buffer.queueh_clbrt, (void*)(&string_buff3[i]), 5);
+		}
+		xEventGroupSetBits(xCreatedEventGroup1, 0x1);
+		xEventGroupWaitBits(xCreatedEventGroup1, 0x2, pdTRUE, pdTRUE, portMAX_DELAY);
+		xQueueSend(buffer.queueh_clbrt, (void*)(((char*) &buffer.adc_calibration_result1)), 1);
+		xQueueSend(buffer.queueh_clbrt, (void*)(((char*) &buffer.adc_calibration_result1)+1), 1);
+		xEventGroupSetBits(xCreatedEventGroup1, 0x4);
+		xEventGroupWaitBits(xCreatedEventGroup1, 0x8, pdTRUE, pdTRUE, portMAX_DELAY);
+		buffer.offset = buffer.adc_calibration_result1 - buffer.adc_calibration_result;
+		buffer.k = ETALON/(buffer.adc_calibration_result1 - buffer.adc_calibration_result);
 
 		vTaskDelay(400);
 		xSemaphoreTake(xSemaphore1, 1);
+		xEventGroupWaitBits(xCreatedEventGroup1, 0x10, pdTRUE, pdTRUE, 1);
 	}
 	vTaskDelete(xTaskGetHandle("calibration"));
 }
@@ -420,8 +459,9 @@ void weighing(void)
 {
 	for( ;; )
 	{
-		vTaskDelay(250);
+		vTaskDelay(500);
 		arm_mean_q15((int16_t*)&buffer.adc_buf, sizeof(buffer.adc_buf)/2, (int16_t*)&buffer.adc_buf_result);
+		buffer.adc_buf_result = (buffer.adc_buf_result - buffer.offset)*buffer.k;
 		xQueueSend(buffer.queueh, (void*)(((char*) &buffer.adc_buf_result)), 1);
 		xQueueSend(buffer.queueh, (void*)(((char*) &buffer.adc_buf_result)+1), 1);
 		xTaskNotify(xTaskGetHandle("send data W"), 0, eNoAction);
@@ -436,15 +476,12 @@ void sendUSART1weighing(void)
 	for( ;; )
 	{
 		xTaskNotifyWait(0x00, 0xffffffff, NULL, portMAX_DELAY);
-		//HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_10);
 		xQueueReceive(buffer.queueh, &buffer.tx[0], portMAX_DELAY);
 		xQueueReceive(buffer.queueh, &buffer.tx[1], portMAX_DELAY);
 		res_to_uart = buffer.tx[0];
 		res_to_uart = res_to_uart + (buffer.tx[1] << 8);
 		sprintf(string_buff, "%d\r\n", res_to_uart);
 		HAL_UART_Transmit(&huart1, (uint8_t*) string_buff, sizeof(string_buff), 100);
-		//vTaskDelay(200);
-		//HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_10);
 	}
 	 vTaskDelete(xTaskGetHandle("send data W"));
 }
@@ -454,7 +491,7 @@ void sendUSART1int(void)
 	for( ;; )
 	{
 		uint16_t res_to_uart;
-		char string_buff[30];
+		char string_buff[30] = {0};
 		xEventGroupWaitBits(xCreatedEventGroup1, 0x4, pdTRUE, pdTRUE, portMAX_DELAY);
 		xQueueReceive(buffer.queueh_clbrt, &buffer.tx[0], portMAX_DELAY);
 		xQueueReceive(buffer.queueh_clbrt, &buffer.tx[1], portMAX_DELAY);
@@ -470,11 +507,9 @@ void sendUSART1char(void)
 {
 	for( ;; )
 	{
-		char string_buff[30];
+		char string_buff[30] = {0};
 		BaseType_t res;
 		uint8_t i = 0;
-//		xTaskNotifyWait(0x00, 0xffffffff, NULL, portMAX_DELAY);
-//		xSemaphoreTake(xSemaphore2, portMAX_DELAY);
 		xEventGroupWaitBits(xCreatedEventGroup1, 0x1, pdTRUE, pdTRUE, portMAX_DELAY);
 		do{
 			res = xQueueReceive(buffer.queueh_clbrt, &string_buff[i], portMAX_DELAY);
@@ -482,8 +517,6 @@ void sendUSART1char(void)
 		}while(res != errQUEUE_EMPTY && string_buff[i-1] != '\0');
 
 		HAL_UART_Transmit(&huart1, (uint8_t*) string_buff, i+1, 100);
-//		xTaskNotify(xTaskGetHandle("calibration"), 0, eNoAction);
-//		xSemaphoreGive(xSemaphore2);
 		xEventGroupSetBits(xCreatedEventGroup1, 0x2);
 	}
 	 vTaskDelete(xTaskGetHandle("send data c"));
@@ -504,9 +537,9 @@ HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	{
 		xSemaphoreGiveFromISR(xSemaphore1, NULL);
 	}
-	if(GPIO_Pin == GPIO_PIN_3)
+	if(GPIO_Pin == GPIO_PIN_13)
 	{
-
+		xEventGroupSetBitsFromISR(xCreatedEventGroup1, 0x10, pdFALSE);
 	}
 }
 
