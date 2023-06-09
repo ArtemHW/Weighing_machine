@@ -10,7 +10,7 @@ To enhance the functionality of the microcontroller, the software aspect of the 
 In summary, this mechatronic scale project utilizes the YZC131C strain gauge sensor, operational amplifiers, an stm32f302R8T6 microcontroller, freeRTOS operating system, and the CMSIS DSP Software Library. The combination of these components and software results in a reliable and precise weighing system capable of accurate signal processing and analysis.
 
 ## Circuit Diagram 
-
+![App Screenshot](https://github.com/ArtemHW/images/blob/main/weighing_machine_schematic.jpg)
 
 ## Photo
 
