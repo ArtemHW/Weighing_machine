@@ -16,3 +16,4 @@ In summary, this mechatronic scale project utilizes the YZC131C strain gauge sen
 ![App Screenshot](https://github.com/ArtemHW/images/blob/main/photo_weighing_machine.jpg)
 
 ## Block scheme
+![App Screenshot](https://github.com/ArtemHW/images/blob/main/weighing_machine.png)
